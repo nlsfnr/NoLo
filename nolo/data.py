@@ -1,7 +1,16 @@
 from itertools import islice
 from logging import getLogger
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Protocol, Tuple, runtime_checkable, Union
+from typing import (
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+    runtime_checkable,
+)
 
 import datasets
 import numpy as np
@@ -24,8 +33,9 @@ SPECIAL_TOKENS = (
 
 # E.g. (['wikitext', 'wikitext-103-raw-v1], {'language': 'en'})
 # Or  [[scientific_papers, pubmed], {split: train}, 'article']
-HFDatasetIdent = Union[Tuple[List[str], Dict[str, str]],
-                       Tuple[List[str], Dict[str, str], str]]
+HFDatasetIdent = Union[
+    Tuple[List[str], Dict[str, str]], Tuple[List[str], Dict[str, str], str]
+]
 
 
 @runtime_checkable
@@ -54,7 +64,7 @@ def load_dataset(
             lambda: iter([{"text": "This is dummy text!"}] * 10)
         )
     else:
-        args, kwargs, key = ident if len(ident) == 3 else (*ident, 'text')
+        args, kwargs, key = ident if len(ident) == 3 else (*ident, "text")
         dataset = datasets.load_dataset(*args, **kwargs, streaming=True)
         dataset = dataset.map(lambda x: dict(text=x[key]))
     if isinstance(dataset, dict):
@@ -73,8 +83,10 @@ def get_batches(
     """Yield batches of tokenized sequences."""
     assert isinstance(config, DataConfig), "Config is missing required attributes"
     if not len(config.datasets) == len(config.dataset_weights):
-        raise ValueError("datasets and dataset_weights must be the same length, "
-                         f"got {len(config.datasets)} and {len(config.dataset_weights)}")
+        raise ValueError(
+            "datasets and dataset_weights must be the same length, "
+            f"got {len(config.datasets)} and {len(config.dataset_weights)}"
+        )
     tokenizer = get_tokenizer(config)
 
     def fn(ident: HFDatasetIdent) -> datasets.IterableDataset:

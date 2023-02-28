@@ -1,6 +1,6 @@
 # ML
 dm-haiku
-chex
+chex==0.1.5
 optax
 einops
 
