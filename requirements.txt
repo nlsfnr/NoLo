@@ -1,0 +1,21 @@
+# ML
+dm-haiku
+chex
+optax
+einops
+
+# Data
+datasets
+tokenizers
+torch
+pydantic
+pyyaml
+
+# Other
+click
+
+# Dev-Ops
+mypy
+pytest
+isort
+black

@@ -1,0 +1,16 @@
+datasets: [
+  [[wikitext, wikitext-103-v1], {split: train}],  # 0.7 GB
+  [[c4, en], {split: train}],  # 305 GB
+  # [[scientific_papers, arxiv], {split: train}, 'article'],  # 11.5 GB
+  [[scientific_papers, pubmed], {split: train}, 'article'],  # 6.7 GB
+]
+# dataset_weights: [0.7, 305, 6.7]
+dataset_weights: [2.1, 305, 13.4]
+
+batch_size: 32
+sequence_length: 32
+min_tokens_per_sequence: 24
+tokenizer_path: './tokenizers/wcb-4k.json'
+tokenizer_max_training_samples: 100000
+tokenizer_min_token_frequency: 100
+vocab_size: 4096
