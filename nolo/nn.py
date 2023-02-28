@@ -16,10 +16,10 @@ class ModelConfig(Protocol):
     vocab_size: int
     n_layers: int
     model_dim: int
+    mlp_size: int
     n_heads: int
     t_mlp_layers: List[int]
     dropout: float
-    mlp_size: int
 
 
 def rotary_pos_emb(
@@ -158,9 +158,9 @@ class EncoderBlock(hk.Module):
         mlp_ln = hk.LayerNorm(-1, True, False, name="mlp_ln")
         mlp = hk.Sequential(
             [
-                hk.Linear(self.mlp_size, with_bias=False),
+                hk.Linear(self.mlp_size, with_bias=False, name="mlp_fc1"),
                 jax.nn.gelu,
-                hk.Linear(self.model_dim, with_bias=False),
+                hk.Linear(self.model_dim, with_bias=False, name="mlp_fc2"),
             ]
         )
         # Multi-head attention
@@ -223,12 +223,18 @@ class Model(hk.Module):
 
     @property
     @hk.transparent
-    def embeddings(self):
+    def _raw_embeddings(self) -> Array:
         raw_embeddings = hk.get_parameter(
             "embeddings",
             [self.vocab_size, self.model_dim],
             init=hk.initializers.RandomNormal(),
         )
+        return raw_embeddings
+
+    @property
+    @hk.transparent
+    def embeddings(self) -> Array:
+        raw_embeddings = self._raw_embeddings
         embeddings = raw_embeddings / jnp.linalg.norm(
             raw_embeddings, axis=-1, keepdims=True
         )
@@ -238,7 +244,11 @@ class Model(hk.Module):
         self,
         indices: Array,
     ) -> Array:
-        return jnp.take(self.embeddings, indices, axis=0)
+        raw_embeddings = jnp.take(self._raw_embeddings, indices, axis=0)
+        embeddings = raw_embeddings / jnp.linalg.norm(
+            raw_embeddings, axis=-1, keepdims=True
+        )
+        return embeddings
 
     def __call__(
         self,

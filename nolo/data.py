@@ -77,7 +77,7 @@ def load_dataset(
 
 def get_batches(
     config: DataConfig,
-    seed: Optional[int] = None,
+    seed: int,
     skip: Optional[int] = None,
 ) -> Iterator[np.ndarray]:
     """Yield batches of tokenized sequences."""
@@ -138,6 +138,7 @@ def get_batches(
         [fn(ident) for ident in config.datasets], weights, seed=seed
     )
     if skip is not None:
+        logger.info(f"Skipping {skip} batches")
         dataset = dataset.skip(skip)
     collate_fn = lambda x: np.stack([s["input_ids"] for s in x], axis=0)
     dataloader = DataLoader(

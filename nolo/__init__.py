@@ -1,11 +1,20 @@
-from .common import Config, setup_logging
+from .common import Config, set_debug, setup_logging
 from .data import DataConfig, create_tokenizer, get_batches, get_tokenizer
+from .sidecar import log, save_checkpoints, train_from_checkpoint, train_new
+from .training import TrainingConfig, train
 
 __all__ = [
     "Config",
-    "setup_logging",
     "DataConfig",
-    "get_batches",
+    "TrainingConfig",
+    "save_checkpoints",
     "create_tokenizer",
+    "get_batches",
     "get_tokenizer",
+    "log",
+    "set_debug",
+    "setup_logging",
+    "train",
+    "train_from_checkpoint",
+    "train_new",
 ]

@@ -34,6 +34,6 @@ def tokenizer(cfg: data.DataConfig) -> Tokenizer:
 
 def test_get_batches(cfg: data.DataConfig, tokenizer: Tokenizer) -> None:
     del tokenizer
-    batches = data.get_batches(cfg)
+    batches = data.get_batches(cfg, seed=1)
     assert isinstance(batches, Iterator)
     assert isinstance(next(batches), np.ndarray)

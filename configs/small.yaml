@@ -1,16 +1,34 @@
 datasets: [
   [[wikitext, wikitext-103-v1], {split: train}],  # 0.7 GB
-  [[c4, en], {split: train}],  # 305 GB
+  # [[c4, en], {split: train}],  # 305 GB
   # [[scientific_papers, arxiv], {split: train}, 'article'],  # 11.5 GB
-  [[scientific_papers, pubmed], {split: train}, 'article'],  # 6.7 GB
+  # [[scientific_papers, pubmed], {split: train}, 'article'],  # 6.7 GB
 ]
 # dataset_weights: [0.7, 305, 6.7]
-dataset_weights: [2.1, 305, 13.4]
+dataset_weights: [1]
 
 batch_size: 32
-sequence_length: 512
-min_tokens_per_sequence: 256
+sequence_length: 64
+min_tokens_per_sequence: 40
 tokenizer_path: './tokenizers/wcb-32k.json'
 tokenizer_max_training_samples: 1000000
 tokenizer_min_token_frequency: 100
 vocab_size: 32768
+
+n_layers: 4
+model_dim: 128
+mlp_size: 512
+n_heads: 4
+t_mlp_layers: [8, 32, 32]
+dropout: 0.0
+
+lr_min: 0.00006
+lr_max: 0.0006
+lr_warmup_steps: 250
+lr_decay_steps: 10000
+gradient_accumulation_steps: 4
+gradient_clip_norm: 0.5
+adam_b1: 0.9
+adam_b2: 0.95
+telemetry_interval: 10
+checkpoint_interval: 100

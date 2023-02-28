@@ -8,9 +8,21 @@ from pathlib import Path
 from queue import Queue
 from typing import Any, Dict, Iterable, Iterator, List, Optional, TypeVar, Union
 
+import jax
 import yaml
 
+logger = logging.getLogger(__name__)
+
+
 T = TypeVar("T")
+
+
+def set_debug(debug: bool) -> None:
+    jax.config.update("jax_debug_nans", debug)
+    jax.config.update("jax_debug_infs", debug)
+    jax.config.update("jax_disable_jit", debug)
+    if debug:
+        logger.warn("Running in debug mode")
 
 
 def buffer(it: Iterator[T], size: int) -> Iterator[T]:

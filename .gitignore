@@ -1,3 +1,4 @@
 .requirements.freeze.txt
 .venv/
 tokenizers/
+zoo/
