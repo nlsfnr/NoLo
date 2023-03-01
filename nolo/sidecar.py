@@ -5,6 +5,8 @@ import logging
 import pickle
 from pathlib import Path
 from typing import Any, Dict, Iterator
+import csv
+import time
 
 import haiku as hk
 import jax.numpy as jnp
@@ -99,10 +101,25 @@ def train_from_checkpoint(
     return train(config, batches, params, opt_state, step, rngs, seed)
 
 
-def log(telemetry: Iterator[Telemetry]) -> Iterator[Telemetry]:
+def log_to_stderr(telemetry: Iterator[Telemetry]) -> Iterator[Telemetry]:
     for t in telemetry:
         logger.info(f"{t.step:6d} | loss={t.loss:.4f}")
         yield t
+
+
+def log_to_csv(telemetry: Iterator[Telemetry],
+               path: Path,
+               ) -> Iterator[Telemetry]:
+    path.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        with open(path, 'w') as f:
+            writer = csv.writer(f)
+            writer.writerow(['step', 'loss', 'time'])
+    with open(path, "a") as f:
+        writer = csv.writer(f)
+        for t in telemetry:
+            writer.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), t.step, t.loss])
+            yield t
 
 
 def save_checkpoints(

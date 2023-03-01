@@ -6,7 +6,7 @@ import sys
 import threading
 from pathlib import Path
 from queue import Queue
-from typing import Any, Dict, Iterable, Iterator, List, Optional, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, TypeVar, Union, Callable
 
 import jax
 import yaml
@@ -25,13 +25,13 @@ def set_debug(debug: bool) -> None:
         logger.warn("Running in debug mode")
 
 
-def buffer(it: Iterator[T], size: int) -> Iterator[T]:
+def buffer(fn: Callable[[], Iterator[T]], size: int) -> Iterator[T]:
     """Buffer an iterator into a queue of size `size`."""
     queue: Queue[Union[T, object]] = Queue(maxsize=size)
     sentinel = object()
 
     def producer() -> None:
-        for item in it:
+        for item in fn():
             queue.put(item)
         queue.put(sentinel)
 
