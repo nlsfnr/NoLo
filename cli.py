@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-from typing import Optional
+from functools import partial
+from typing import Optional, Iterator, Callable
 import click
 import logging
 
@@ -44,6 +45,20 @@ def cli_tokenizer(config: Path) -> None:
     nolo.create_tokenizer(cfg)
 
 
+def _add_sidecar_processors(train_fn: Callable[[], Iterator[nolo.Telemetry]],
+                            out: Optional[Path],
+                            ) -> Iterator[nolo.Telemetry]:
+    # Buffer the telemetry stream to mitigate the impact of slow I/O etc. in
+    # downstream processors.
+    telemetry = nolo.buffer(train_fn, 2)
+    telemetry = nolo.log_to_stderr(telemetry)
+    if out is None:
+        logger.warning("No output path specified, checkpoints will not be saved")
+    else:
+        telemetry = nolo.save_checkpoints(telemetry, out)
+    return telemetry
+
+
 @cli.command('train')
 @click.option('--config', '-c', type=Path, required=True)
 @click.option('--seed', '-s', type=int, required=True)
@@ -54,12 +69,8 @@ def cli_train(config: Path,
               ) -> None:
     cfg = nolo.Config.from_yaml(config)
     assert isinstance(cfg, nolo.TrainingConfig)
-    telemetry = nolo.train_new(cfg, seed=seed)
-    telemetry = nolo.log(telemetry)
-    if out is None:
-        logger.warning("No output path specified, checkpoints will not be saved")
-    else:
-        telemetry = nolo.save_checkpoints(telemetry, out)
+    train_fn = partial(nolo.train_new, cfg, seed=seed)
+    telemetry = _add_sidecar_processors(train_fn, out)
     for _ in telemetry:
         pass
 
@@ -70,12 +81,8 @@ def cli_train(config: Path,
 def cli_resume(checkpoint: Path,
                out: Optional[Path],
                ) -> None:
-    telemetry = nolo.train_from_checkpoint(checkpoint)
-    telemetry = nolo.log(telemetry)
-    if out is None:
-        logger.warning("No output path specified, checkpoints will not be saved")
-    else:
-        telemetry = nolo.save_checkpoints(telemetry, out)
+    train_fn = partial(nolo.train_from_checkpoint, checkpoint)
+    telemetry = _add_sidecar_processors(train_fn, out)
     for _ in telemetry:
         pass
 
