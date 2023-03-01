@@ -15,20 +15,20 @@ tokenizer_max_training_samples: 1000000
 tokenizer_min_token_frequency: 100
 vocab_size: 32768
 
-n_layers: 4
-model_dim: 128
-mlp_size: 512
-n_heads: 4
+n_layers: 8
+model_dim: 256
+mlp_size: 1024
+n_heads: 8
 t_mlp_layers: [8, 32, 32]
 dropout: 0.0
 
-lr_min: 0.00006
-lr_max: 0.0006
+lr_min: 0.0001
+lr_max: 0.001
 lr_warmup_steps: 250
 lr_decay_steps: 10000
-gradient_accumulation_steps: 4
+gradient_accumulation_steps: 1
 gradient_clip_norm: 0.5
 adam_b1: 0.9
 adam_b2: 0.95
 telemetry_interval: 10
-checkpoint_interval: 100
+checkpoint_interval: 250

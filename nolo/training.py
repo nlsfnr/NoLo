@@ -18,7 +18,7 @@ import numpy as np
 import optax
 from chex import Array, ArrayTree, PRNGKey
 
-from . import data, nn
+from . import data, diffusion, nn
 
 
 @runtime_checkable
@@ -106,7 +106,7 @@ def loss_fn(
     B, S, D = x0.shape
     noise = jax.random.normal(hk.next_rng_key(), (B, S, D))
     t = jax.random.uniform(hk.next_rng_key(), (B, 1))
-    xt = x0 + noise * t[:, :, None]
+    xt = diffusion.pertubation_kernel(x0, t, noise)
     logits = model(xt, t, is_training=True)
     loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, indices))
     return loss, (dict(loss=loss) if collect_telemetry else dict())

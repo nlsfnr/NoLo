@@ -80,5 +80,27 @@ def cli_resume(checkpoint: Path,
         pass
 
 
+@cli.command('sample')
+@click.option('--checkpoint', '-c', type=Path, required=True)
+@click.option('--steps', type=int, default=100,
+              help='Number of diffusion steps to take')
+@click.option('--sequence-length', type=int, default=None,
+              help='Length of the generated sequence')
+@click.option('--seed', '-s', type=int, required=True)
+def cli_sample(checkpoint: Path,
+               steps: int,
+               sequence_length: Optional[int],
+               seed: int,
+               ) -> None:
+    cp = nolo.load_checkpoint(checkpoint, for_inference=True)
+    params = cp["params"]
+    config = cp["config"]
+    it = nolo.sample(params, config, steps=steps, sequence_length=sequence_length, seed=seed)
+    for xt, text in it:
+        click.echo(text)
+        click.echo(click.style(f"{xt.mean():.4f} +/- {xt.std():.4f}", fg="blue"))
+        click.echo()
+
+
 if __name__ == "__main__":
     cli()

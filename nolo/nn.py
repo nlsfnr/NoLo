@@ -222,7 +222,6 @@ class Model(hk.Module):
         )
 
     @property
-    @hk.transparent
     def _raw_embeddings(self) -> Array:
         raw_embeddings = hk.get_parameter(
             "embeddings",
@@ -232,7 +231,6 @@ class Model(hk.Module):
         return raw_embeddings
 
     @property
-    @hk.transparent
     def embeddings(self) -> Array:
         raw_embeddings = self._raw_embeddings
         embeddings = raw_embeddings / jnp.linalg.norm(

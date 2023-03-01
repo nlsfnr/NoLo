@@ -31,7 +31,7 @@ def train_new(
     params = hk.transform(model_fn).init(next(rngs))
     params_n = hk.data_structures.tree_size(params)
     params_mb = round(hk.data_structures.tree_bytes(params) / 1e6, 2)
-    logger.info(f'Model parameters: {params_n:,} ({params_mb:.2f} MB)')
+    logger.info(f"Model parameters: {params_n:,} ({params_mb:.2f} MB)")
     opt_state = get_optimizer(config).init(params)
     batches = data.get_batches(config, seed)
     return train(config, batches, params, opt_state, 0, rngs, seed)
@@ -61,10 +61,13 @@ def save_checkpoint(
 
 def load_checkpoint(
     path: Path,
+    for_inference: bool = False,
 ) -> Dict[str, Any]:
     config = common.Config.from_yaml(path / "config.yaml")
     with open(path / "params.pkl", "rb") as f:
         params = pickle.load(f)
+    if for_inference:
+        return dict(config=config, params=params)
     with open(path / "opt_state.pkl", "rb") as f:
         opt_state = pickle.load(f)
     with open(path / "rngs.pkl", "rb") as f:
