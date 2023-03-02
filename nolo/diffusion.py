@@ -41,12 +41,9 @@ def sampling_step(
     next_t: Array,  # B S
 ) -> Tuple[Array, Array]:
     alpha = expand_dims(alpha_schedule(t), xt)
-    print(alpha)
     weights = jax.nn.softmax(logits, axis=-1)
     x0 = jnp.einsum("v d, b s v -> b s d", embeddings, weights)
-    plot(xt)
     noise = (xt - alpha**0.5 * x0) / (1 - alpha) ** 0.5
-    plot(noise)
     next_xt = pertubation_kernel(x0, next_t, noise)
     return x0, next_xt
 
