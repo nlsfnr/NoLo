@@ -28,7 +28,7 @@ def cli_show_samples(config: Path,
                      ) -> None:
     cfg = nolo.Config.from_yaml(config)
     assert isinstance(cfg, nolo.DataConfig)
-    batches = nolo.get_batches(cfg, seed=seed)
+    batches = nolo.get_batches(cfg, seed=seed or 0)
     tokenizer = nolo.get_tokenizer(cfg)
     samples = (sample for batch in batches for sample in batch)
     for _ in range(number):
@@ -50,12 +50,16 @@ def _add_sidecar_processors(train_fn: Callable[[], Iterator[nolo.Telemetry]],
                             ) -> Iterator[nolo.Telemetry]:
     # Buffer the telemetry stream to mitigate the impact of slow I/O etc. in
     # downstream processors.
-    telemetry = nolo.buffer(train_fn, 2)
+    telemetry = nolo.buffer(train_fn, 10)
     telemetry = nolo.log_to_stderr(telemetry)
     if out is None:
         logger.warning("No output path specified, checkpoints will not be saved")
     else:
         telemetry = nolo.save_checkpoints(telemetry, out)
+        telemetry = nolo.log_to_csv(telemetry, out / "telemetry.csv")
+        telemetry = nolo.plot_from_csv(telemetry,
+                                       out / "telemetry.csv",
+                                       out / "telemetry.png")
     return telemetry
 
 
@@ -103,9 +107,11 @@ def cli_sample(checkpoint: Path,
     params = cp["params"]
     config = cp["config"]
     it = nolo.sample(params, config, steps=steps, sequence_length=sequence_length, seed=seed)
-    for xt, text in it:
+    for xt, x0, text in it:
         click.echo(text)
-        click.echo(click.style(f"{xt.mean():.4f} +/- {xt.std():.4f}", fg="blue"))
+        msg = (f"xt: {xt.mean():.4f} +/- {xt.std():.4f}"
+               f"\nx0: {x0.mean():.4f} +/- {x0.std():.4f}")
+        click.echo(click.style(msg, fg="blue"))
         click.echo()
 
 

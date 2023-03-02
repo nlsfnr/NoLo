@@ -1,15 +1,29 @@
 from __future__ import annotations
 
+import inspect
 import itertools
 import logging
 import sys
 import threading
 from pathlib import Path
-from queue import Queue
-from typing import Any, Dict, Iterable, Iterator, List, Optional, TypeVar, Union, Callable
+from queue import Full, Queue
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import jax
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import yaml
+from chex import Array
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +32,7 @@ T = TypeVar("T")
 
 
 def set_debug(debug: bool) -> None:
+    """Set debug mode for JAX."""
     jax.config.update("jax_debug_nans", debug)
     jax.config.update("jax_debug_infs", debug)
     jax.config.update("jax_disable_jit", debug)
@@ -29,20 +44,29 @@ def buffer(fn: Callable[[], Iterator[T]], size: int) -> Iterator[T]:
     """Buffer an iterator into a queue of size `size`."""
     queue: Queue[Union[T, object]] = Queue(maxsize=size)
     sentinel = object()
+    terminate = threading.Event()
 
     def producer() -> None:
         for item in fn():
-            queue.put(item)
+            try:
+                queue.put(item, timeout=0.1)
+            except Full:
+                pass
+            if terminate.is_set():
+                return
         queue.put(sentinel)
 
     thread = threading.Thread(target=producer)
-    thread.start()
     try:
+        thread.start()
         while True:
             item = queue.get()
             if item is sentinel:
                 break
             yield item  # type: ignore
+    except Exception:
+        terminate.set()
+        raise
     finally:
         thread.join()
 
@@ -112,6 +136,7 @@ def setup_logging(
     log_to_stdout: bool,
     logfile: Optional[Path],
 ) -> None:
+    """Setup logging to stdout and/or a file."""
     handlers: List[logging.Handler] = []
     handlers.append(logging.StreamHandler(sys.stdout if log_to_stdout else sys.stderr))
     if logfile is not None:
@@ -121,3 +146,55 @@ def setup_logging(
         format="[%(asctime)s|%(name)s|%(levelname)s] %(message)s",
         handlers=handlers,
     )
+
+
+def expand_dims(x: Array, reference: Union[int, Array]) -> Array:
+    """Expand the dimensions of `x` to match the dimensions of `reference`."""
+    if isinstance(reference, Array):
+        reference = reference.ndim
+    while x.ndim < reference:
+        x = x[..., None]
+    return x
+
+
+def l2_norm(x: Array, axis: int = -1) -> Array:
+    return x / jnp.linalg.norm(x, axis=axis, keepdims=True)
+
+
+def plot(
+    x: Array,
+    title: Optional[str] = None,
+    out_dir: Path = Path("plots/"),
+) -> Array:
+    """Plot a {1, 2, 3}D array."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if title is None:
+        title = get_callstack_name()
+    old_x = x
+    if not x.ndim in (1, 2, 3):
+        raise ValueError(f"Can't plot {x.ndim}-dimensional array")
+    if x.ndim == 3:
+        if x.shape[0] == 1:
+            # Remove batch dimension
+            x = x[0]
+        elif x.shape[2] not in (1, 3):
+            # Otherwise, either grey-scale or RGB
+            raise ValueError(f"Can't plot {x.shape[2]}-channel image")
+    if x.ndim == 1:
+        plt.plot(x)
+        plt.grid()
+    else:
+        plt.imshow(x, cmap="gray" if x.ndim == 2 else None)
+        plt.axis("off")
+    enhanced_title = f"{title}\n{tuple(x.shape)} {x.mean():.6f} {x.std():.6f}"
+    plt.title(enhanced_title)
+    plt.tight_layout()
+    plt.savefig(out_dir / f'{title.replace(" ", "-").replace("/", "-")}.png')
+    plt.close()
+    return old_x
+
+
+def get_callstack_name(depth: int = 2) -> str:
+    """Get the name of the function that called this function and the line number of the call."""
+    caller = inspect.stack()[depth]
+    return f"{caller.function}:{caller.lineno}"

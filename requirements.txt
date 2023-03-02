@@ -13,6 +13,7 @@ pyyaml
 
 # Other
 click
+matplotlib
 
 # Dev-Ops
 mypy

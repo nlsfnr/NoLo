@@ -2,3 +2,4 @@
 .venv/
 tokenizers/
 zoo/
+plots/

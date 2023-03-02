@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 import tokenizers
 from tokenizers import Tokenizer  # type: ignore
 
-from .common import chunks
+from .common import buffer, chunks
 
 logger = getLogger(__name__)
 
@@ -43,6 +43,8 @@ class DataConfig(Protocol):
     # Datasets
     datasets: List[HFDatasetIdent]
     dataset_weights: List[float]
+    shuffle_buffer_size: int
+    dataset_buffer_size: int
     # Batches and sequence
     batch_size: int
     sequence_length: int
@@ -58,26 +60,34 @@ def load_dataset(
     ident: HFDatasetIdent,
     repeat_forever: bool = False,
 ) -> datasets.IterableDataset:
-    logger.info(f"Streaming dataset {ident}")
-    if ident == "dummy":
-        return datasets.IterableDataset.from_generator(
-            lambda: iter([{"text": "This is dummy text!"}] * 10)
-        )
-    else:
-        args, kwargs, key = ident if len(ident) == 3 else (*ident, "text")
-        dataset = datasets.load_dataset(*args, **kwargs, streaming=True)
-        dataset = dataset.map(lambda x: dict(text=x[key]))
-    if isinstance(dataset, dict):
-        raise ValueError(
-            f"Expected dataset, got dict. Maybe you forgot to specify the split?"
-        )
-    assert isinstance(dataset, datasets.IterableDataset)
+    def get_stream() -> Iterator[Dict[str, str]]:
+        while True:
+            logger.info(f"Streaming dataset {ident}")
+            if ident[0][0] == "dummy":
+                logger.info(f"Streaming dataset {ident}")
+                yield from [{"text": "This is dummy text!"}] * 100
+            else:
+                args, kwargs, key = ident if len(ident) == 3 else (*ident, "text")
+                dataset = datasets.load_dataset(*args, **kwargs, streaming=True)
+                dataset = dataset.map(lambda x: dict(text=x[key]))
+                dataset = dataset.select_columns("text")
+                if isinstance(dataset, dict):
+                    raise ValueError(
+                        f"Expected dataset, got dict. Maybe you forgot to specify the split?"
+                    )
+                assert isinstance(dataset, datasets.IterableDataset)
+                yield from iter(dataset)
+            if not repeat_forever:
+                return
+
+    dataset = datasets.IterableDataset.from_generator(get_stream)
     return dataset
 
 
 def get_batches(
     config: DataConfig,
     seed: int,
+    repeat_forever: bool = False,
     skip: Optional[int] = None,
 ) -> Iterator[np.ndarray]:
     """Yield batches of tokenized sequences."""
@@ -89,62 +99,68 @@ def get_batches(
         )
     tokenizer = get_tokenizer(config)
 
-    def fn(ident: HFDatasetIdent) -> datasets.IterableDataset:
-        dataset = load_dataset(ident)
-        # Tokenize samples
-        dataset = dataset.map(
-            lambda x: dict(
-                input_ids=[enc.ids for enc in tokenizer.encode_batch(x["text"])]
-            ),
-            batched=True,
-        )
-        # Only keep the input ids
-        dataset = dataset.select_columns("input_ids")
-        # Split samples into chunks with max size `sequence_length`
-        dataset = dataset.map(
-            lambda x: dict(
-                input_ids=list(
-                    (
-                        chunk
-                        for sample in x["input_ids"]
-                        for chunk in chunks(sample, config.sequence_length)
+    def inner() -> Iterator[np.ndarray]:
+        def fn(ident: HFDatasetIdent) -> datasets.IterableDataset:
+            dataset = load_dataset(ident, repeat_forever)
+            # Tokenize samples
+            dataset = dataset.map(
+                lambda x: dict(
+                    input_ids=[enc.ids for enc in tokenizer.encode_batch(x["text"])]
+                ),
+                batched=True,
+            )
+            # Only keep the input ids
+            dataset = dataset.select_columns("input_ids")
+            # Split samples into chunks with max size `sequence_length`
+            dataset = dataset.map(
+                lambda x: dict(
+                    input_ids=list(
+                        (
+                            chunk
+                            for sample in x["input_ids"]
+                            for chunk in chunks(sample, config.sequence_length)
+                        )
                     )
-                )
-            ),
-            batched=True,
-        )
-        # Filter chunks that are too short
-        dataset = dataset.filter(
-            lambda x: len(x["input_ids"]) >= config.min_tokens_per_sequence
-        )
-        # Shuffle the chunks
-        dataset = dataset.shuffle(generator=np.random.default_rng(seed))
-        # Add padding
-        pad_id = tokenizer.token_to_id(PAD_TOKEN)
-        dataset = dataset.map(
-            lambda x: dict(
-                input_ids=np.pad(
-                    x["input_ids"],
-                    (0, config.sequence_length - len(x["input_ids"])),
-                    constant_values=pad_id,
-                )
-            ),
-        )
-        return dataset
+                ),
+                batched=True,
+            )
+            # Filter chunks that are too short
+            dataset = dataset.filter(
+                lambda x: len(x["input_ids"]) >= config.min_tokens_per_sequence
+            )
+            # Shuffle the chunks
+            dataset = dataset.shuffle(
+                generator=np.random.default_rng(seed),
+                buffer_size=config.shuffle_buffer_size,
+            )
+            # Add padding
+            pad_id = tokenizer.token_to_id(PAD_TOKEN)
+            dataset = dataset.map(
+                lambda x: dict(
+                    input_ids=np.pad(
+                        x["input_ids"],
+                        (0, config.sequence_length - len(x["input_ids"])),
+                        constant_values=pad_id,
+                    )
+                ),
+            )
+            return dataset
 
-    weights = np.asarray(config.dataset_weights)
-    weights = weights / weights.sum()
-    dataset = datasets.interleave_datasets(
-        [fn(ident) for ident in config.datasets], weights, seed=seed
-    )
-    if skip is not None:
-        logger.info(f"Skipping {skip} batches")
-        dataset = dataset.skip(skip)
-    collate_fn = lambda x: np.stack([s["input_ids"] for s in x], axis=0)
-    dataloader = DataLoader(
-        dataset, batch_size=config.batch_size, collate_fn=collate_fn
-    )
-    return iter(dataloader)
+        weights = np.asarray(config.dataset_weights)
+        weights = weights / weights.sum()
+        dataset = datasets.interleave_datasets(
+            [fn(ident) for ident in config.datasets], weights, seed=seed
+        )
+        if skip is not None:
+            logger.info(f"Skipping {skip} batches")
+            dataset = dataset.skip(skip)
+        collate_fn = lambda x: np.stack([s["input_ids"] for s in x], axis=0)
+        dataloader = DataLoader(
+            dataset, batch_size=config.batch_size, collate_fn=collate_fn
+        )
+        return iter(dataloader)
+
+    return buffer(inner, config.dataset_buffer_size)
 
 
 def get_tokenizer(config: DataConfig) -> Tokenizer:
@@ -159,15 +175,10 @@ def create_tokenizer(config: DataConfig) -> Tokenizer:
     assert isinstance(config, DataConfig), "Config is missing required attributes"
     logger.info("Creating tokenizer")
 
-    def fn(ident: HFDatasetIdent) -> datasets.IterableDataset:
-        dataset = load_dataset(ident)
-        dataset.map(lambda x: x["text"])
-        return dataset
-
     weights = np.asarray(config.dataset_weights)
     weights = weights / weights.sum()
     dataset = datasets.interleave_datasets(
-        [fn(ident) for ident in config.datasets],
+        [load_dataset(ident) for ident in config.datasets],
         weights,
     )
     texts: Iterator[str] = (x["text"] for x in dataset)

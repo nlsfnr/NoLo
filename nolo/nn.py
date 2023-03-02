@@ -10,6 +10,8 @@ import jax.numpy as jnp
 from chex import Array
 from einops import rearrange, repeat
 
+from .common import expand_dims, l2_norm
+
 
 @runtime_checkable
 class ModelConfig(Protocol):
@@ -85,9 +87,9 @@ class MultiHeadAttention(hk.Module):
         l: Array = jnp.einsum("b h i k, b h j k -> b h i j", q, k)  # B H L L
         if is_training:
             l = hk.dropout(hk.next_rng_key(), self.dropout, l)
-        a = jax.nn.softmax(l, axis=-1)  # B H L L
+        a: Array = jax.nn.softmax(l, axis=-1)  # B H L L
         # Attention output
-        y = jnp.einsum("b h i j, b h j v -> b h i v", a, v)  # B H L V
+        y: Array = jnp.einsum("b h i j, b h j v -> b h i v", a, v)  # B H L V
         y = rearrange(y, "b h l v -> b l (h v)")  # B L (H V)
         return o_proj(y)  # B L M
 
@@ -108,13 +110,18 @@ class AffineConditioning(hk.Module):
         is_training: bool,
     ) -> Array:
         n_channels = x.shape[-1]
-        scale = hk.Linear(n_channels, with_bias=False, name="scale")(t_emb)  # B S D
-        offset = hk.Linear(n_channels, with_bias=False, name="offset")(t_emb)  # B S D
+        proj = partial(
+            hk.Linear,
+            with_bias=False,
+            w_init=hk.initializers.TruncatedNormal(stddev=0.02),
+        )
+        log_scale = proj(n_channels, name="scale")(t_emb)  # B S D
+        offset = proj(n_channels, name="offset")(t_emb)  # B S D
         if is_training:
-            scale = hk.dropout(hk.next_rng_key(), self.dropout, scale)
+            log_scale = hk.dropout(hk.next_rng_key(), self.dropout, log_scale)
             offset = hk.dropout(hk.next_rng_key(), self.dropout, offset)
         x = hk.LayerNorm(-1, False, False)(x)  # B S D
-        x = x * scale + offset  # B S D
+        x = x * jnp.exp(log_scale) + offset  # B S D
         return x
 
 
@@ -233,9 +240,7 @@ class Model(hk.Module):
     @property
     def embeddings(self) -> Array:
         raw_embeddings = self._raw_embeddings
-        embeddings = raw_embeddings / jnp.linalg.norm(
-            raw_embeddings, axis=-1, keepdims=True
-        )
+        embeddings = l2_norm(raw_embeddings)
         return embeddings
 
     def embed(
@@ -243,9 +248,7 @@ class Model(hk.Module):
         indices: Array,
     ) -> Array:
         raw_embeddings = jnp.take(self._raw_embeddings, indices, axis=0)
-        embeddings = raw_embeddings / jnp.linalg.norm(
-            raw_embeddings, axis=-1, keepdims=True
-        )
+        embeddings = l2_norm(raw_embeddings)
         return embeddings
 
     def __call__(
@@ -255,7 +258,7 @@ class Model(hk.Module):
         is_training: bool,
     ) -> Array:
         assert x.ndim == 3  # B S D
-        assert t.ndim == 2  # B S
+        t = expand_dims(t, 2)  # B 1
         # T Embedding
         t_emb_dim, *t_mlp_layers = self.t_mlp_layers
         frequencies = 0.5 * jnp.pi * 2.0 ** jnp.arange(0, t_emb_dim, dtype=jnp.float32)
@@ -271,7 +274,7 @@ class Model(hk.Module):
                 mlp_size=self.mlp_size or self.model_dim * 4,
                 dropout=self.dropout,
                 use_rotary=i == 0,
-                use_affine=i == 0,
+                use_affine=True,
                 name=f"encoder_block_{i}",
             )
             x = block(x, t_emb, is_training=is_training)

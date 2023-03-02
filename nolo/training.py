@@ -31,8 +31,10 @@ class TrainingConfig(nn.ModelConfig, data.DataConfig, Protocol):
     gradient_clip_norm: float
     adam_b1: float
     adam_b2: float
+    label_smoothing: float
     telemetry_interval: int
     checkpoint_interval: int
+    plot_interval: int
 
 
 @dataclass
@@ -56,22 +58,25 @@ def train(
     seed: int,
 ) -> Iterator[Telemetry]:
     train_step_fn = jax.jit(partial(train_step, config=config), static_argnums=(4,))
+    losses = []
     for batch in batches:
         collect_telemetry = step % config.telemetry_interval == 0
         out = train_step_fn(
             params, opt_state, next(rngs), jnp.asarray(batch), collect_telemetry
         )
         params, opt_state, telemetry_data = out
+        losses.append(float(telemetry_data["loss"]))
         if collect_telemetry:
             yield Telemetry(
                 step=step,
-                loss=telemetry_data["loss"],
+                loss=float(jnp.mean(jnp.asarray(losses))),
                 params=params,
                 opt_state=opt_state,
                 rngs=rngs,
                 config=config,
                 seed=seed,
             )
+            losses.clear()
         step += 1
 
 
@@ -105,11 +110,19 @@ def loss_fn(
     x0 = model.embed(indices)
     B, S, D = x0.shape
     noise = jax.random.normal(hk.next_rng_key(), (B, S, D))
-    t = jax.random.uniform(hk.next_rng_key(), (B, 1))
+    t = jax.random.uniform(hk.next_rng_key(), (B,))
     xt = diffusion.pertubation_kernel(x0, t, noise)
     logits = model(xt, t, is_training=True)
-    loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, indices))
-    return loss, (dict(loss=loss) if collect_telemetry else dict())
+    labels = jax.nn.one_hot(indices, logits.shape[-1])
+    smoothed_labels = optax.smooth_labels(labels, config.label_smoothing)
+    losses = optax.softmax_cross_entropy(logits, smoothed_labels)
+    loss = jnp.mean(losses)
+    telemetry = (
+        dict(loss=loss)  # TODO: Add logits, labels, etc.
+        if collect_telemetry
+        else dict(loss=loss)
+    )
+    return loss, telemetry
 
 
 def get_optimizer(config: TrainingConfig) -> optax.MultiSteps:
@@ -117,7 +130,11 @@ def get_optimizer(config: TrainingConfig) -> optax.MultiSteps:
         [
             optax.linear_schedule(config.lr_min, config.lr_max, config.lr_warmup_steps),
             (
-                optax.cosine_decay_schedule(config.lr_max, config.lr_decay_steps)
+                optax.cosine_decay_schedule(
+                    config.lr_max,
+                    config.lr_decay_steps,
+                    alpha=config.lr_min / config.lr_max,
+                )
                 if config.lr_decay_steps is not None
                 else optax.constant_schedule(config.lr_max)
             ),

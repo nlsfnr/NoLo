@@ -6,6 +6,8 @@ datasets: [
 ]
 # dataset_weights: [0.7, 305, 6.7]
 dataset_weights: [1.]
+shuffle_buffer_size: 5000
+dataset_buffer_size: 1000
 
 batch_size: 32
 sequence_length: 32
@@ -23,5 +25,6 @@ gradient_accumulation_steps: 2
 gradient_clip_norm: 0.5
 adam_b1: 0.9
 adam_b2: 0.95
+label_smoothing: 0.1
 telemetry_interval: 10
 checkpoint_interval: 100
