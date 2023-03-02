@@ -17,6 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 from chex import Array, ArrayTree, PRNGKey
+import jmp
 
 from . import data, diffusion, nn
 
@@ -32,6 +33,11 @@ class TrainingConfig(nn.ModelConfig, data.DataConfig, Protocol):
     adam_b1: float
     adam_b2: float
     label_smoothing: float
+    # AMP
+    use_half_precision: bool
+    loss_scale_period: Optional[int]
+    initial_loss_scale_log2: Optional[int]
+    # Telemetry and checkpoints
     telemetry_interval: int
     checkpoint_interval: int
     plot_interval: int
@@ -43,6 +49,7 @@ class Telemetry:
     loss: float
     params: ArrayTree
     opt_state: optax.MultiStepsState
+    loss_scale: jmp.LossScale
     rngs: hk.PRNGSequence
     config: TrainingConfig
     seed: int
@@ -53,18 +60,19 @@ def train(
     batches: Iterable[np.ndarray],
     params: ArrayTree,
     opt_state: optax.MultiStepsState,
+    loss_scale: jmp.LossScale,
     step: int,
     rngs: hk.PRNGSequence,
     seed: int,
 ) -> Iterator[Telemetry]:
-    train_step_fn = jax.jit(partial(train_step, config=config), static_argnums=(4,))
+    train_step_fn = jax.jit(partial(train_step, config=config), static_argnums=(5,))
     losses = []
     for batch in batches:
         collect_telemetry = step % config.telemetry_interval == 0
         out = train_step_fn(
-            params, opt_state, next(rngs), jnp.asarray(batch), collect_telemetry
+            params, opt_state, loss_scale, next(rngs), jnp.asarray(batch), collect_telemetry
         )
-        params, opt_state, telemetry_data = out
+        params, opt_state, loss_scale, telemetry_data = out
         losses.append(float(telemetry_data["loss"]))
         if collect_telemetry:
             yield Telemetry(
@@ -72,6 +80,7 @@ def train(
                 loss=float(jnp.mean(jnp.asarray(losses))),
                 params=params,
                 opt_state=opt_state,
+                loss_scale=loss_scale,
                 rngs=rngs,
                 config=config,
                 seed=seed,
@@ -83,25 +92,35 @@ def train(
 def train_step(
     params: ArrayTree,
     opt_state: optax.MultiStepsState,
+    loss_scale: jmp.LossScale,
     rng: PRNGKey,
     batch: Array,
     collect_telemetry: bool,
     *,
     config: TrainingConfig,
-) -> Tuple[ArrayTree, ArrayTree, Telemetry]:
+) -> Tuple[ArrayTree, ArrayTree, jmp.LossScale, Telemetry]:
     optimizer = get_optimizer(config)
     grad_hk = hk.transform(
         partial(loss_fn, config=config, collect_telemetry=collect_telemetry)
     )
     grad_fn = jax.grad(grad_hk.apply, has_aux=True)
-    gradients, telemetry = grad_fn(params, rng, batch)
-    updates, opt_state = optimizer.update(gradients, opt_state)
-    params = optax.apply_updates(params, updates)
-    return params, opt_state, telemetry
+    gradients, telemetry = grad_fn(params, rng, batch, loss_scale)
+    gradients = loss_scale.unscale(gradients)
+    gradients_finite = jmp.all_finite(gradients)
+    loss_scale = loss_scale.adjust(gradients_finite)
+    updates, new_opt_state = optimizer.update(gradients, opt_state)
+    new_params = optax.apply_updates(params, updates)
+    # Only actually update the params and opt_state if all gradients were finite
+    opt_state, params = jmp.select_tree(
+        gradients_finite,
+        (new_opt_state, new_params),
+        (opt_state, params))
+    return params, opt_state, loss_scale, telemetry
 
 
 def loss_fn(
     indices: Array,
+    loss_scale: jmp.LossScale,
     collect_telemetry: bool,
     *,
     config: TrainingConfig,
@@ -122,7 +141,7 @@ def loss_fn(
         if collect_telemetry
         else dict(loss=loss)
     )
-    return loss, telemetry
+    return loss_scale.scale(loss), telemetry
 
 
 def get_optimizer(config: TrainingConfig) -> optax.MultiSteps:

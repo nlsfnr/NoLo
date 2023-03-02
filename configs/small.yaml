@@ -35,6 +35,11 @@ gradient_clip_norm: 0.5
 adam_b1: 0.9
 adam_b2: 0.95
 label_smoothing: 0.1
+
+use_half_precision: true
+loss_scale_period: 500
+initial_loss_scale_log2: 14
+
 telemetry_interval: 10
 checkpoint_interval: 250
 plot_interval: 100

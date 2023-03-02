@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator
 
 import haiku as hk
+import jmp
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
@@ -22,30 +23,12 @@ from .training import Telemetry, TrainingConfig, get_optimizer, train
 logger = logging.getLogger(__name__)
 
 
-def train_new(
-    config: TrainingConfig,
-    seed: int,
-) -> Iterator[Telemetry]:
-    def model_fn() -> None:
-        model = nn.Model.from_config(config)
-        x = model.embed(jnp.zeros((1, config.sequence_length), dtype=jnp.int32))
-        model(x, jnp.zeros((1, config.sequence_length)), is_training=True)
-
-    rngs = hk.PRNGSequence(seed)
-    params = hk.transform(model_fn).init(next(rngs))
-    params_n = hk.data_structures.tree_size(params)
-    params_mb = round(hk.data_structures.tree_bytes(params) / 1e6, 2)
-    logger.info(f"Model parameters: {params_n:,} ({params_mb:.2f} MB)")
-    opt_state = get_optimizer(config).init(params)
-    batches = data.get_batches(config, seed, repeat_forever=True)
-    return train(config, batches, params, opt_state, 0, rngs, seed)
-
-
 def save_checkpoint(
     path: Path,
     config: common.Config,
     params: ArrayTree,
     opt_state: optax.MultiStepsState,
+    loss_scale: jmp.LossScale,
     rngs: hk.PRNGSequence,
     step: int,
     seed: int,
@@ -56,6 +39,8 @@ def save_checkpoint(
         pickle.dump(params, f)
     with open(path / "opt_state.pkl", "wb") as f:
         pickle.dump(opt_state, f)
+    with open(path / "loss_scale.pkl", "wb") as f:
+        pickle.dump(loss_scale, f)
     with open(path / "rngs.pkl", "wb") as f:
         pickle.dump(rngs, f)
     with open(path / "other.yaml", "w") as f:
@@ -72,6 +57,8 @@ def load_checkpoint(
         params = pickle.load(f)
     if for_inference:
         return dict(config=config, params=params)
+    with open(path / "loss_scale.pkl", "rb") as f:
+        loss_scale = pickle.load(f)
     with open(path / "opt_state.pkl", "rb") as f:
         opt_state = pickle.load(f)
     with open(path / "rngs.pkl", "rb") as f:
@@ -85,10 +72,39 @@ def load_checkpoint(
         config=config,
         params=params,
         opt_state=opt_state,
+        loss_scale=loss_scale,
         rngs=rngs,
         step=other["step"],
         seed=other["seed"],
     )
+
+
+def train_new(
+    config: TrainingConfig,
+    seed: int,
+) -> Iterator[Telemetry]:
+    def model_fn() -> None:
+        model = nn.Model.from_config(config)
+        x = model.embed(jnp.zeros((1, config.sequence_length), dtype=jnp.int32))
+        model(x, jnp.zeros((1, config.sequence_length)), is_training=True)
+
+    rngs = hk.PRNGSequence(seed)
+    params = hk.transform(model_fn).init(next(rngs))
+    params_n = hk.data_structures.tree_size(params)
+    params_mb = round(hk.data_structures.tree_bytes(params) / 1e6, 2)
+    logger.info(f"Model parameters: {params_n:,} ({params_mb:.2f} MB)")
+    if config.use_half_precision:
+        assert config.initial_loss_scale_log2 is not None
+        assert config.loss_scale_period is not None
+        loss_scale = jmp.DynamicLossScale(
+                loss_scale=jnp.asarray(2. ** config.initial_loss_scale_log2),
+                period=config.loss_scale_period,
+                counter=jnp.asarray(0))
+    else:
+        loss_scale = jmp.NoOpLossScale()
+    opt_state = get_optimizer(config).init(params)
+    batches = data.get_batches(config, seed, repeat_forever=True)
+    return train(config, batches, params, opt_state, loss_scale, 0, rngs, seed)
 
 
 def train_from_checkpoint(
@@ -102,8 +118,9 @@ def train_from_checkpoint(
     rngs = checkpoint["rngs"]
     step = checkpoint["step"]
     seed = checkpoint["seed"]
+    loss_scale = checkpoint["loss_scale"]
     batches = data.get_batches(config, skip=step, seed=seed, repeat_forever=True)
-    return train(config, batches, params, opt_state, step, rngs, seed)
+    return train(config, batches, params, opt_state, loss_scale, step, rngs, seed)
 
 
 def log_to_stderr(telemetry: Iterator[Telemetry]) -> Iterator[Telemetry]:
@@ -156,12 +173,13 @@ def save_checkpoints(
     for t in telemetry:
         if t.step % t.config.checkpoint_interval == 0:
             save_checkpoint(
-                path,
-                t.config,  # type: ignore
-                t.params,
-                t.opt_state,
-                t.rngs,
-                t.step,
-                t.seed,
+                path=path,
+                config=t.config,  # type: ignore
+                params=t.params,
+                opt_state=t.opt_state,
+                loss_scale=t.loss_scale,
+                rngs=t.rngs,
+                step=t.step,
+                seed=t.seed,
             )
         yield t
