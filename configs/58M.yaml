@@ -8,42 +8,38 @@ dataset:
   #  - args: [bookcorpusopen]  # 6.3 GB
   #    kwargs: {split: train}
   #    weight: 37.8  # 6:1
-  #  - args: [multi_news]  # 0.7 GB
-  #    kwargs: {split: train, key: document}
-  #    weight: 4.2  # 6:1
+  - args: [multi_news]  # 0.7 GB
+    kwargs: {split: train, key: document}
+    weight: 4.2  # 6:1
 
 tokenizer:
   args: [bert-base-uncased]
   kwargs: {}
 
 data:
-  length: 128
-  batch_size: 32
+  length: 256
+  batch_size: 64
   shuffle_buffer_size: 25_000
   per_dataset_shuffle_buffer_size: 1_000
 
 model:
-  num_layers: 4
+  num_layers: 8
   vocabulary_size: 32_768
   embedding_dim: 128
-  model_dim: 256
-  num_heads: 4
+  model_dim: 512
+  num_heads: 8
   pos_emb_portion: 0.5
   t_emb_dim: 10
-  hidden_dim: 768
+  hidden_dim: 2_048
   dropout: 0.0
 
-time_warping:
-  alpha: 0.95
-  bins: 256
-
 optimizer:
-  gradient_accumulation_steps: [[0, 4]]
+  gradient_accumulation_steps: [[0, 1], [5000, 8]]
   weight_decay: 0.01
   lr_min: 0.00006
   lr_max: 0.0006
-  lr_decay_steps: 10_000
-  lr_warmup_steps: 500
+  lr_decay_steps: 250_000
+  lr_warmup_steps: 1_000
   gradient_clip_norm: 1.0
   adam_b1: 0.9
   adam_b2: 0.995

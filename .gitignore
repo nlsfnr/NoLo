@@ -1,5 +1,5 @@
 .requirements.freeze.txt
 .venv/
-tokenizers/
-zoo/
-plots/
+wandb/
+.mypy_cache/
+.pytest_cache/

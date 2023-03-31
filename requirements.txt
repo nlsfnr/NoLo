@@ -1,23 +1,17 @@
-# ML
 dm-haiku
-chex==0.1.5
 optax
 einops
-jmp
+chex==0.1.5
 
-# Data
+numpy
 datasets
 tokenizers
-torch
-pydantic
+
+wandb
 pyyaml
 
-# Other
-click
-matplotlib
-
-# Dev-Ops
 mypy
-pytest
+flake8
 isort
 black
+pytest

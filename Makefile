@@ -1,9 +1,12 @@
+NAME=nolo
+
+DOCKER=$(NAME):latest
+TEST_DIR=$(NAME)/
+PY_FILES=$(NAME)/ scripts/
+
 VENV=.venv
 PYTHON=$(VENV)/bin/python3
-DOCKER=nolo
 PIP_FREEZE=.requirements.freeze.txt
-TEST_DIR=nolo/
-PY_FILES=nolo/
 
 .PHONY: ci
 ci: $(PY_FILES) py-deps type-check format test
@@ -20,8 +23,8 @@ type-check: $(VENV) $(PY_FILES)
 .PHONY: format
 format: $(VENV) $(PY_FILES)
 	$(PYTHON) -m isort $(PY_FILES)
+	$(PYTHON) -m flake8 $(PY_FILES)
 	$(PYTHON) -m black $(PY_FILES)
-
 
 .PHONY: test
 test: $(VENV) $(PY_FILES)
